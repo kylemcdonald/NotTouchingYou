@@ -116,7 +116,7 @@ void ofApp::draw(){
                                   ofClamp(k2d.y, -780, -300),
                                   -tcpHeight));
     if(kinectFollow) {
-        parameters.targetTCP.position = closestPointRobot.get() / 1000.;
+        parameters.targetTCP.position = parameters.targetTCP.position.interpolate(closestPointRobot.get() / 1000., parameters.followLerp);
     }
     
     gizmo.setViewDimensions(viewportSim.width, viewportSim.height);
