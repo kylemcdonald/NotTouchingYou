@@ -357,27 +357,14 @@ void ofApp::drawGUI(){
 //--------------------------------------------------------------
 void ofApp::updateActiveCamera(){
     
-//    if (viewportReal.inside(ofGetMouseX(), ofGetMouseY()))
-//    {
-        activeCam = 0;
-//        if(!cams[0]->getMouseInputEnabled()){
-//            cams[0]->enableMouseInput();
-//        }
-//        if(cams[1]->getMouseInputEnabled()){
-//            cams[1]->disableMouseInput();
-//        }
-//    }
     if(viewportSim.inside(ofGetMouseX(), ofGetMouseY()))
     {
-        activeCam = 1;
-        if(!cams[1]->getMouseInputEnabled()){
-            cams[1]->enableMouseInput();
+        activeCam = 0;
+        if(!cams[0]->getMouseInputEnabled()){
+            cams[0]->enableMouseInput();
         }
-        if(cams[0]->getMouseInputEnabled()){
+        if(gizmo.isInteracting() && cams[0]->getMouseInputEnabled()){
             cams[0]->disableMouseInput();
-        }
-        if(gizmo.isInteracting() && cams[1]->getMouseInputEnabled()){
-            cams[1]->disableMouseInput();
         }
     }
 }
