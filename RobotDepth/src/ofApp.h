@@ -39,7 +39,7 @@ public:
     void dragEvent(ofDragInfo dragInfo);
     void gotMessage(ofMessage msg);
     
-    RobotParameters parameters;
+    ofxRobotArm::RobotParameters parameters;
     
     URIKFast kinematics;
     
@@ -65,7 +65,7 @@ public:
     ofxPanel panelJointsSpeed;
     
     
-    RobotController robot;
+    ofxRobotArm::RobotController robot;
     void moveTCP();
     
     

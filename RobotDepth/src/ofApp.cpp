@@ -49,10 +49,10 @@ void ofApp::setup(){
 
 //--------------------------------------------------------------
 void ofApp::update(){
+    updateKinect();
     moveTCP();
     robot.update();
     updateActiveCamera();
-    updateKinect();
 }
 
 void ofApp::updateKinect() {
@@ -163,6 +163,8 @@ void ofApp::draw(){
     robotMaskImage.end();
     
     ofPushMatrix();
+    ofTranslate(viewportSim.width, 0);
+    ofPushMatrix();
     ofScale(depthImageScale, depthImageScale);
     
     ofPushStyle();
@@ -195,6 +197,7 @@ void ofApp::draw(){
     ofDrawRectangle(0, 0, w, h);
     
     ofPopStyle();
+    ofPopMatrix();
     ofPopMatrix();
     
     drawGUI();
@@ -248,7 +251,7 @@ void ofApp::moveTCP(){
 }
 
 void ofApp::setupViewports(){
-    viewportSim = ofRectangle(0, 0, ofGetWidth() - 200, ofGetHeight());
+    viewportSim = ofRectangle(0, 0, ofGetWidth()/2, ofGetHeight());
     viewportReal = ofRectangle(0, 0, 1, 1);
     viewportDepth = ofRectangle(0, 0, 640, 480);
     
@@ -345,25 +348,25 @@ void ofApp::positionGUI(){
 void ofApp::drawGUI(){
     panel.draw();
     panelJoints.draw();
-//    panelJointsIK.draw();
-//    panelJointsSpeed.draw();
-//    panelTargetJoints.draw();
+    panelJointsIK.draw();
+    panelJointsSpeed.draw();
+    panelTargetJoints.draw();
 }
 
 
 //--------------------------------------------------------------
 void ofApp::updateActiveCamera(){
     
-    if (viewportReal.inside(ofGetMouseX(), ofGetMouseY()))
-    {
+//    if (viewportReal.inside(ofGetMouseX(), ofGetMouseY()))
+//    {
         activeCam = 0;
-        if(!cams[0]->getMouseInputEnabled()){
-            cams[0]->enableMouseInput();
-        }
-        if(cams[1]->getMouseInputEnabled()){
-            cams[1]->disableMouseInput();
-        }
-    }
+//        if(!cams[0]->getMouseInputEnabled()){
+//            cams[0]->enableMouseInput();
+//        }
+//        if(cams[1]->getMouseInputEnabled()){
+//            cams[1]->disableMouseInput();
+//        }
+//    }
     if(viewportSim.inside(ofGetMouseX(), ofGetMouseY()))
     {
         activeCam = 1;
@@ -431,9 +434,6 @@ void ofApp::keyPressed(int key){
     }
     if( key == 'g' ) {
         gizmo.setType( ofxGizmo::OFX_GIZMO_MOVE );
-    }
-    if( key == 's' ) {
-        gizmo.setType( ofxGizmo::OFX_GIZMO_SCALE );
     }
     if( key == 'e' ) {
         gizmo.toggleVisible();

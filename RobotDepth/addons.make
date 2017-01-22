@@ -1,8 +1,9 @@
 ofxAssimpModelLoader
-ofxCv
+ofxCV
 ofxGML
 ofxGizmo
 ofxGui
+ofxIKArm
 ofxKinect
 ofxOpenCv
 ofxPtf
