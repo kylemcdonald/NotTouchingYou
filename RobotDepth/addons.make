@@ -1,5 +1,5 @@
 ofxAssimpModelLoader
-ofxCV
+ofxCv
 ofxGML
 ofxGizmo
 ofxGui
