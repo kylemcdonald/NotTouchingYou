@@ -23,6 +23,8 @@
 
 #include "ofApp.h"
 
+using namespace ofxCv;
+
 //--------------------------------------------------------------
 void ofApp::setup(){
     ofSetFrameRate(60);
@@ -67,6 +69,7 @@ void ofApp::updateKinect() {
     kinect.update();
     
     if(kinect.isFrameNew()) {
+        contourFinder.setThreshold(contourThreshold);
         contourFinder.setMinAreaRadius(minContourArea);
         contourFinder.findContours(kinect.getPixels());
     }
@@ -81,42 +84,115 @@ void ofApp::draw(){
     ofVec2f mouseRaw(mouseX, mouseY);
     mouseRaw /= depthImageScale;
     ofVec2f m2d = convertKinectToRobot(mouseRaw);
-    // made - here because z is flipped
-    mousePositionRobot.set(ofVec3f(ofClamp(m2d.x, -150, 270),
-                                   ofClamp(m2d.y, -780, -300),
-                                   -tcpHeight));
-    if(mouseFollow) {
-        parameters.targetTCP.position = mousePositionRobot.get() / 1000.;
-    }
     
     // kinect following conversion
     if(contourFinder.size() > 0) {
         ofPolyline& blob = contourFinder.getPolyline(0);
-        float maxx = 0;
-        int offset = 0;
+        // look for the point that's closest to the robot's position (xOffset, yOffset)
+        float minDistance = 0;
+        ofVec2f curClosest;
+        ofVec2f center(xOffset, yOffset);
         int n = blob.size();
         for(int i = 0; i < n; i++) {
-            if(blob[i].x > maxx) {
-                maxx = blob[i].x;
-                offset = i;
+            float distance = center.distance(blob[i]);
+            if(i == 0 || distance < minDistance) {
+                minDistance = distance;
+                curClosest = blob[i];
             }
         }
-        int averageRange = 3;
-        ofVec2f average;
-        for(int i = -averageRange; i <= +averageRange; i++) {
-            int j = (offset + i + n) % n;
-            average += blob[j];
+        
+        // always interpolate position
+        closest.interpolate(curClosest, kinectLerpAmount);
+        
+        float sampleOffset = 6;
+        samplePoint = closest + (closest - center).normalize() * sampleOffset;
+        int samplex = round(samplePoint.x);
+        int sampley = round(samplePoint.y);
+        float depthSum = 0;
+        int depthCount = 0;
+        int sampleRadius = 4;
+        unsigned char* kinectPixels = kinect.getPixels().getData();
+        int kinectHeight = kinect.getHeight();
+        int kinectWidth = kinect.getWidth();
+        for(int yoff = -sampleRadius; yoff <= +sampleRadius; yoff++) {
+            for(int xoff = -sampleRadius; xoff <= +sampleRadius; xoff++) {
+                int x = ofClamp(samplex + xoff, 0, kinectWidth-1);
+                int y = ofClamp(sampley + yoff, 0, kinectHeight-1);
+                int i = y * kinectWidth + x;
+                if(kinectPixels[i] > contourThreshold) {
+                    depthSum += kinect.grayToDistance(kinectPixels[i]);
+                    depthCount++;
+                }
+            }
         }
-        average /= 1 + (2 * averageRange);
-        closestPointKinect = average;
+        
+        if(depthCount > 0) {
+            float curVisitorHeight = sensorHeight - (depthSum / depthCount);
+            // always interpolate height
+            visitorHeight = ofLerp(visitorHeight, curVisitorHeight, kinectLerpAmount);
+        } else {
+//            ofLog() << "Not enough depth samples: " << depthCount;
+        }
     }
-    ofVec2f k2d = convertKinectToRobot(closestPointKinect);
-    k2d.y += maintainDistance;
-    closestPointRobot.set(ofVec3f(ofClamp(k2d.x, -150, 270),
-                                  ofClamp(k2d.y, -780, -300),
-                                  -tcpHeight));
+    ofVec2f k2d = convertKinectToRobot(closest);
+    
+    float z;
     if(kinectFollow) {
-        parameters.targetTCP.position = parameters.targetTCP.position.interpolate(closestPointRobot.get() / 1000., parameters.followLerp);
+        p2d = k2d;
+        z = visitorHeight - armHeight;
+    }
+    if(mouseFollow) {
+        p2d = m2d;
+        z = tcpHeight;
+    }
+    ofVec2f p2dpre = p2d;
+    ofVec2f pdir = p2d.getNormalized();
+    p2d -= pdir * maintainDistance;
+    if(kinectFollow || mouseFollow) {
+        float baseRotationOffset = +90; // accounts for base rotation offset
+        float minRadius = 320, maxRadius = 600;
+        float minHeight = -500, maxHeight = +600;
+        float thetaConstraint = 0.75;
+        float leadRange = 45; // max degrees to lead with gaze
+        float t = ofGetElapsedTimef() * positionNoiseSpeed;
+        
+        // clamp rotation about center
+        p2d.rotate(+baseRotationOffset); // apply rotation
+        float theta = atan2(p2d.y, p2d.x);
+        theta = ofClamp(theta, -PI * thetaConstraint, +PI * thetaConstraint);
+        p2d.rotate(-baseRotationOffset); // unapply rotation
+        
+        // clamp distance from center
+        float radius = sqrt(p2d.x * p2d.x + p2d.y * p2d.y);
+        radius = ofClamp(radius, minRadius, maxRadius);
+        
+        // set rotation vector based on unclamped position
+        ofQuaternion rotate;
+        ofVec2f target = ofVec3f(parameters.tcpPosition) * 1000;
+        float baseTheta = baseRotationOffset - ofRadToDeg(theta);
+        float leadingTheta = -ofRadToDeg(atan2(p2dpre.y - target.y, p2dpre.x - target.x));
+        float clampedTheta = baseTheta + ofClamp(leadingTheta - baseTheta, -leadRange, +leadRange);
+        float xrot = ofSignedNoise(t, 0) * rotationNoise;
+        float yrot = ofSignedNoise(0, t) * rotationNoise;
+        ofVec3f up(xrot,yrot,-1); // up vector points -z
+        rotate.makeRotate(clampedTheta, up);
+        parameters.targetTCP.rotation = rotate;
+        
+        // clamp position and unapply rotation
+        p2d.x = cos(theta) * radius;
+        p2d.y = sin(theta) * radius;
+        p2d.rotate(-baseRotationOffset); // unapply rotation
+        
+        float clampedHeight = ofClamp(z, minHeight, maxHeight);
+        
+        // set position to constrained location
+        ofVec3f noise(ofSignedNoise(t, 0, 0),
+                      ofSignedNoise(0, t, 0),
+                      ofSignedNoise(0, 0, t));
+        noise *= positionNoise;
+        noise *= ofMap(sin((ofGetElapsedTimef() * TWO_PI) / breathRate), -1, +1, 0, 1);
+        mousePositionRobot.set(ofVec3f(p2d.x, p2d.y, clampedHeight) + noise);
+        parameters.targetTCP.position = mousePositionRobot.get() / 1000.;
     }
     
     gizmo.setViewDimensions(viewportSim.width, viewportSim.height);
@@ -127,7 +203,7 @@ void ofApp::draw(){
     tcpNode.draw();
     
     ofDisableDepthTest();
-    ofSetColor(255, 0, 0, 128);
+    ofSetColor(magentaPrint, 128);
     robot.draw();
     
     gizmo.draw(*cams[0]);
@@ -135,9 +211,9 @@ void ofApp::draw(){
     robot.drawPreview();
     
     ofNoFill();
-    ofSetColor(0,255,0);
+    ofSetColor(yellowPrint);
     ofDrawSphere(mousePositionRobot, 10);
-    ofSetColor(0,0,255);
+    ofSetColor(cyanPrint);
     ofDrawSphere(closestPointRobot, 10);
     ofPopStyle();
     cams[0]->end();
@@ -174,23 +250,25 @@ void ofApp::draw(){
     ofNoFill();
     contourFinder.draw();
     if(contourFinder.size() > 0) {
-        ofSetColor(255, 0, 0);
+        ofSetColor(magentaPrint);
         contourFinder.getPolyline(0).draw();
-        ofSetColor(0, 0, 255);
-        ofDrawCircle(closestPointKinect, 8);
+        ofSetColor(yellowPrint);
+        ofDrawCircle(samplePoint, 3);
+        ofSetColor(cyanPrint);
+        ofDrawCircle(closest, 8);
         ofSetColor(255);
     }
     
     ofNoFill();
     
-    ofSetColor(0, 0, 255);
+    ofSetColor(cyanPrint);
     ofDrawCircle(mouseRaw, 8);
     
-    ofSetColor(255, 0, 0);
+    ofSetColor(magentaPrint);
     ofVec3f target = ofVec3f(parameters.tcpPosition) * 1000;
     ofDrawCircle(convertRobotToKinect(target), 8);
     
-    ofSetColor(0, 255, 0);
+    ofSetColor(yellowPrint);
     ofVec3f actual = ofVec3f(parameters.targetTCPPosition) * 1000;
     ofDrawCircle(convertRobotToKinect(actual), 8);
     
@@ -313,14 +391,14 @@ void ofApp::setupGUI(){
     float maxPosition = 2000;
     appParams.add(position.set("position", ofVec3f(-410, 62, 0), ofVec3f(-maxPosition, -100, -100), ofVec3f(+maxPosition, +100, +100)));
     appParams.add(cameraRotation.set("camera rotation", ofVec3f(0, 0, -2), ofVec3f(1,1,1) * -10, ofVec3f(1,1,1) * +10));
-    appParams.add(near.set("near", 2400, 2000, 4000));
-    appParams.add(far.set("far", 3840, 2000, 4000));
+    appParams.add(near.set("near", 2000, 2000, 4000));
+    appParams.add(far.set("far", 3800, 2000, 4000));
     appParams.add(maxLength.set("maxLength", 200, 0, 400));
     appParams.add(stepSize.set("stepSize", 2, 1, 16));
     appParams.add(orthoScaleKinect.set("ortho scale kinect", 4, 1, 6));
     appParams.add(horizontalFlip.set("horizontal flip", false));
     
-    appParams.add(tcpHeight.set("tcp height", -330, -500, 0));
+    appParams.add(tcpHeight.set("tcp height", 330, -500, 500));
     appParams.add(mousePositionRobot.set("mouse position",
                                         ofVec3f(),
                                         ofVec3f(1,1,1) * -1000,
@@ -331,8 +409,17 @@ void ofApp::setupGUI(){
                                         ofVec3f(1,1,1) * -1000,
                                         ofVec3f(1,1,1) * +1000));
     appParams.add(kinectFollow.set("kinect follow", false));
+    appParams.add(contourThreshold.set("contour threshold", 40, 0, 255));
     appParams.add(minContourArea.set("min contour area", 20, 0, 40));
-    appParams.add(maintainDistance.set("maintain distance", 100, 0, 1000));
+    appParams.add(maintainDistance.set("maintain dist mm", 100, 0, 1000));
+    appParams.add(sensorHeight.set("sensor height mm", 4100, 4000, 4200));
+    appParams.add(visitorHeight.set("visitor height mm", 1600, 0, 2000));
+    appParams.add(armHeight.set("arm height mm", 990, 500, 1500));
+    appParams.add(kinectLerpAmount.set("lerp amount", .1, 0, 1));
+    appParams.add(positionNoise.set("position noise mm", 15, 0, 50));
+    appParams.add(rotationNoise.set("rotation noise", .1, 0, .5));
+    appParams.add(positionNoiseSpeed.set("position noise speed", .1, 0, 1));
+    appParams.add(breathRate.set("breath rate s", 2, .5, 5));
     panel.add(appParams);
 }
 
@@ -351,6 +438,12 @@ void ofApp::drawGUI(){
     panelJointsIK.draw();
     panelJointsSpeed.draw();
     panelTargetJoints.draw();
+    
+    ofPushStyle();
+    ofSetColor(255,160);
+    ofDrawBitmapString("OF FPS "+ofToString(ofGetFrameRate()), 30, ofGetWindowHeight()-50);
+    ofDrawBitmapString("Robot FPS "+ofToString(robot.robot.getThreadFPS()), 30, ofGetWindowHeight()-65);
+    ofPopStyle();
 }
 
 

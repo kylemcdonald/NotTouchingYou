@@ -102,9 +102,16 @@ public:
     ofParameter<ofVec3f> mousePositionRobot, closestPointRobot;
     
     ofxCv::ContourFinder contourFinder;
-    ofVec2f closestPointKinect;
+    ofVec2f closest;
+    ofParameter<int> contourThreshold;
     ofParameter<float> minContourArea;
     ofParameter<float> maintainDistance;
+    ofParameter<float> kinectLerpAmount;
+    ofParameter<float> sensorHeight, visitorHeight, armHeight;
+    ofParameter<float> positionNoise, positionNoiseSpeed, rotationNoise, breathRate;
+    
+    ofVec2f p2d;
+    ofVec2f samplePoint;
     
     ofVec2f convertRobotToKinect(ofVec2f v) {
         v.y *= -1; // ofRotateX(180);
